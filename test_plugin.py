@@ -91,3 +91,36 @@ for sku, expected in [
 ]:
     got = p.multiplier_for(sku)
     print("%-28s -> %-4s %s" % (sku, got, "OK" if got == expected else "NG(expected %s)" % expected))
+
+
+# --- 7. バー描画の単体確認 ------------------------------------------------------
+banner("bar()")
+for pct, expected in [
+    (0, "░░░░░░░░"), (6, "░░░░░░░░"), (7, "█░░░░░░░"), (25, "██░░░░░░"),
+    (50, "████░░░░"), (62, "█████░░░"), (90, "███████░"), (100, "████████"),
+    (118, "████████"), (-5, "░░░░░░░░"),
+]:
+    got = p.bar(pct)
+    print("%4d%% -> %s %s" % (pct, got, "OK" if got == expected else "NG(expected %s)" % expected))
+
+print()
+for style in ("solid", "shade", "dots", "eighth", "none"):
+    print("%-8s 62%% -> [%s]" % (style, p.bar(62, 8, style)))
+
+print()
+print("幅指定:", " / ".join("%d cells: %s" % (n, p.bar(62, n)) for n in (6, 8, 10, 20)))
+
+print()
+banner("title_for()")
+for cfg in [
+    dict(CFG),
+    dict(CFG, show_percent=False),
+    dict(CFG, label=""),
+    dict(CFG, label="", show_percent=False),
+    dict(CFG, bar_style="none"),
+    dict(CFG, bar_style="eighth", bar_cells=10),
+]:
+    desc = "label=%r style=%s cells=%s pct=%s" % (
+        cfg.get("label"), cfg.get("bar_style", "solid"),
+        cfg.get("bar_cells", 8), cfg.get("show_percent", True))
+    print("%-52s -> [%s]" % (desc, p.title_for(62.4, cfg)))

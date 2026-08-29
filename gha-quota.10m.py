@@ -18,6 +18,9 @@
 #     "user": "your-github-login",
 #     "included_minutes": 2000,       // Free:2000 / Pro:3000 / Team:3000
 #     "keychain_service": "gha-quota",
+#     "bar_style": "solid",           // solid / eighth / shade / dots / none
+#     "bar_cells": 8,
+#     "show_percent": true,
 #     "warn": 75,
 #     "crit": 90
 #   }
@@ -41,12 +44,17 @@ UA = "gha-quota-swiftbar/1.0"
 # SKU 名から無料枠の消費倍率を求める。標準ランナーは 2 コアで Ubuntu=1x / Windows=2x / macOS=10x。
 MULTIPLIERS = (("macos", 10), ("windows", 2), ("ubuntu", 1), ("linux", 1))
 
+# 消化バーの文字。(消化済み, 未消化) の組。等幅フォントでないと桁が揃わないので font=Menlo で描く。
+BAR_CHARS = {"solid": ("█", "░"), "shade": ("▓", "▒"), "dots": ("●", "○")}
+BAR_PARTIALS = " ▏▎▍▌▋▊▉"  # 1/8 刻み。bar_style="eighth" のときだけ使う
+
 
 # --------------------------------------------------------------------------- 設定
 
 def load_config():
     cfg = {"included_minutes": 2000, "warn": 75, "crit": 90, "label": "GHA",
-           "keychain_service": "gha-quota"}
+           "keychain_service": "gha-quota", "bar_style": "solid", "bar_cells": 8,
+           "show_percent": True}
     try:
         with open(CONFIG_PATH) as fh:
             cfg.update(json.load(fh))
@@ -211,6 +219,33 @@ def summarize_legacy(data):
 
 # --------------------------------------------------------------------------- 出力
 
+def bar(pct, cells=8, style="solid"):
+    """消化率をブロック文字のバーにする。100% を超えても満杯で止める（色で警告する）。"""
+    if style == "none" or cells < 1:
+        return ""
+    ratio = max(0.0, min(1.0, pct / 100.0))
+    if style == "eighth":
+        units = ratio * cells * 8
+        full = int(units // 8)
+        if full >= cells:
+            return "█" * cells
+        rem = int(units % 8)
+        return "█" * full + (BAR_PARTIALS[rem] if rem else "░") + "░" * (cells - full - 1)
+    on, off = BAR_CHARS.get(style, BAR_CHARS["solid"])
+    filled = min(cells, int(round(ratio * cells)))
+    return on * filled + off * (cells - filled)
+
+
+def title_for(pct, cfg):
+    """メニューバーに出す1行。ラベル / バー / % を空でないものだけ繋ぐ。"""
+    parts = [
+        cfg.get("label", "GHA"),
+        bar(pct, int(cfg.get("bar_cells", 8)), cfg.get("bar_style", "solid")),
+        "%d%%" % round(pct) if cfg.get("show_percent", True) else "",
+    ]
+    return " ".join(x for x in parts if x)
+
+
 def color_for(pct, cfg):
     if pct >= cfg["crit"]:
         return "#ff453a"
@@ -235,7 +270,7 @@ def render(cfg, stats, source, today):
     remaining = max(0.0, included - used)
 
     out = [
-        line("%s %d%%" % (cfg.get("label", "GHA"), round(pct)), symbolize="false", color=color_for(pct, cfg), font="Menlo", size=13),
+        line(title_for(pct, cfg), symbolize="false", color=color_for(pct, cfg), font="Menlo", size=13),
         "---",
         line("GitHub Actions 無料枠", color="#888888"),
         line("消化 %s / %s 分 (%d%%)" % (fmt(used), fmt(included), round(pct))),
