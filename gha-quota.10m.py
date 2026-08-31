@@ -125,6 +125,10 @@ class SetupError(Exception):
     pass
 
 
+# 旧課金 API の直近の失敗理由。両 API とも取れなかったときの表示に使う。
+LEGACY_ERROR = None
+
+
 # --------------------------------------------------------------------------- API
 
 def api_get(path, token):
@@ -142,10 +146,20 @@ def api_get(path, token):
 
 
 def fetch_legacy(user, token):
-    """旧課金基盤。included_minutes / total_minutes_used がそのまま返る。"""
+    """旧課金基盤。included_minutes / total_minutes_used がそのまま返る。
+
+    Enhanced Billing Platform へ移行済みのアカウントでは 410 Gone になる。
+    失敗理由は LEGACY_ERROR に残す（黙って None を返すと調査できない）。
+    """
+    global LEGACY_ERROR
+    LEGACY_ERROR = None
     try:
         data = api_get("/users/%s/settings/billing/actions" % user, token)
-    except Exception:
+    except urllib.error.HTTPError as exc:
+        LEGACY_ERROR = "HTTP %s (%s)" % (exc.code, exc.reason)
+        return None
+    except Exception as exc:
+        LEGACY_ERROR = str(exc)
         return None
     if not isinstance(data, dict) or "included_minutes" not in data:
         return None
@@ -342,18 +356,23 @@ def main():
     stats = None
     source = ""
     usage_error = None
+    new_stats = None
     try:
-        items = fetch_usage(cfg["user"], cfg["token"], today)
-        new_stats = summarize_usage(items)
-        if new_stats["raw"] > 0:
-            stats = new_stats
-            source = "新課金API"
-            if legacy and legacy.get("included_minutes"):
-                stats["included"] = float(legacy["included_minutes"])
+        new_stats = summarize_usage(fetch_usage(cfg["user"], cfg["token"], today))
     except urllib.error.HTTPError as exc:
         usage_error = "HTTP %s (%s)" % (exc.code, exc.reason)
     except Exception as exc:
         usage_error = str(exc)
+
+    # 新 API が 200 で空配列を返すのは「今月まだ 0 分」であって取得失敗ではない。
+    # 月初はこれが正常なので 0 分をそのまま採用する。旧 API に実績があるときだけ譲る
+    # （移行前アカウントで新 API が空を返すケースの保険）。
+    legacy_used = float((legacy or {}).get("total_minutes_used") or 0)
+    if new_stats is not None and not (new_stats["raw"] == 0 and legacy_used > 0):
+        stats = new_stats
+        source = "新課金API"
+        if legacy and legacy.get("included_minutes"):
+            stats["included"] = float(legacy["included_minutes"])
 
     if stats is None and legacy is not None:
         stats = summarize_legacy(legacy)
@@ -364,7 +383,11 @@ def main():
             return render_error("トークンの権限が足りません", usage_error)
         if usage_error and "401" in usage_error:
             return render_error("トークンが無効です", usage_error)
-        return render_error("利用状況を取得できませんでした", usage_error or "不明なエラー")
+        detail = " / ".join(x for x in (
+            "新API: " + usage_error if usage_error else "",
+            "旧API: " + LEGACY_ERROR if LEGACY_ERROR else "",
+        ) if x)
+        return render_error("利用状況を取得できませんでした", detail or "不明なエラー")
 
     return render(cfg, stats, source, today)
 

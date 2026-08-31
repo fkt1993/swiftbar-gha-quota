@@ -82,7 +82,16 @@ def boom(u, t, d):
 p.fetch_usage = boom
 print(p.main())
 
-# --- 6. 倍率判定の単体確認 ------------------------------------------------------
+# --- 6. 月初 -----------------------------------------------------------------
+# 新 API は 200 で usageItems が空（＝今月まだ 0 分）、旧 API は移行済みで 410 Gone。
+# ここで「取得失敗」に倒すと月初の数日だけエラー表示になる。
+banner("月初: 新API 0 件 / 旧API 410 Gone")
+p.LEGACY_ERROR = "HTTP 410 (Gone)"
+p.fetch_legacy = lambda u, t: None
+p.fetch_usage = lambda u, t, d: []
+print(p.main())
+
+# --- 7. 倍率判定の単体確認 ------------------------------------------------------
 banner("multiplier_for()")
 for sku, expected in [
     ("Actions Linux", 1), ("UBUNTU", 1), ("Actions macOS", 10), ("MACOS", 10),
@@ -93,7 +102,7 @@ for sku, expected in [
     print("%-28s -> %-4s %s" % (sku, got, "OK" if got == expected else "NG(expected %s)" % expected))
 
 
-# --- 7. バー描画の単体確認 ------------------------------------------------------
+# --- 8. バー描画の単体確認 ------------------------------------------------------
 banner("bar()")
 for pct, expected in [
     (0, "░░░░░░░░"), (6, "░░░░░░░░"), (7, "█░░░░░░░"), (25, "██░░░░░░"),

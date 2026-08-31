@@ -38,10 +38,18 @@ config への平文書き込みは後方互換のための最終手段で、`ins
 **課金 API を2本叩く。** GitHub が新課金基盤（Enhanced Billing Platform）へ移行中で、
 アカウントによってどちらが返るか違う。
 
-- 旧 `GET /users/{user}/settings/billing/actions` — `included_minutes` / `total_minutes_used` が直接返る。移行済みだと 0 が返る報告あり。現行ドキュメントからも消えかけているので、いずれ削除される前提でいる
+- 旧 `GET /users/{user}/settings/billing/actions` — `included_minutes` / `total_minutes_used` が直接返る。
+  **2026-09-01 時点で `your-login` のアカウントでは 410 Gone（"This endpoint has been moved."）**。
+  移行前アカウント用にコードは残してあるが、この環境では死んでいる。失敗理由は `LEGACY_ERROR` に入る
 - 新 `GET /users/{user}/settings/billing/usage?year=&month=` — SKU 別明細。`netAmount` が超過課金額。fine-grained PAT の **Plan: Read-only** が必要（classic / gh の既定トークンでは 403）
 
-`main()` は新 API に実績があればそちらを、なければ旧 API を使う。どちらを使ったかはドロップダウン最下段に出る。
+`main()` は新 API が成功したらそれを採用する。どちらを使ったかはドロップダウン最下段に出る。
+
+**新 API の `usageItems: []` は「取得失敗」ではなく「今月まだ 0 分」。** 月初はこれが正常。
+かつて `if new_stats["raw"] > 0` を新 API 採用の条件にしていたため、9/1 に 0 分 → 旧 API へフォールバック
+→ 旧 API は 410 → 「利用状況を取得できませんでした」になった（2026-09-01 に修正）。
+旧 API に実績がある移行前アカウントのときだけ旧 API に譲る、という条件に変えてある。
+`test_plugin.py` のケース 6 がこの回帰を見張っている。
 
 **倍率は SKU 名から引く。** `multiplier_for()` が macOS=10 / Windows=2 / Ubuntu=1、
 さらに `N-core` にマッチしたら `N/2` を掛ける。価格から比率を出す方式にしなかったのは、
@@ -57,8 +65,8 @@ config への平文書き込みは後方互換のための最終手段で、`ins
 
 ## 未検証・弱いところ
 
-- **実データでの疎通確認しかしていない。** モックは全分岐通っているが、`your-login` のアカウントで
-  実際にどちらの API が返っているかは動作確認の1回分しか見ていない
+- **旧 API 経路は実データで確認できない。** 410 になったので、`summarize_legacy()` と
+  移行前アカウント向けの分岐はモックでしか通っていない
 - **大型ランナー（4-core 以上）はそもそも無料枠の対象外**なのに、コア数で按分して消化分数に混ぜている。
   参考値でしかない。正確にやるなら無料枠計算から除外して `$` の超過側だけに寄せるべき
 - **月初リセットは決め打ち。** `days_left()` は月末までの日数を返すだけで、実際の請求サイクル日は見ていない
